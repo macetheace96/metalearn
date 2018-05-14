@@ -35,8 +35,8 @@ class Metafeatures(object):
     CATEGORICAL = "CATEGORICAL"
 
     def __init__(self):
-        self.queue = multiprocessing.Queue()
-        self.error = multiprocessing.Queue()
+        self.queue = multiprocessing.Manager().Queue()
+        self.error = multiprocessing.Manager().Queue()
         self.resource_info_dict = {}
         self.metafeatures_list = []
         mf_info_file_path = os.path.splitext(__file__)[0] + '.json'
@@ -86,78 +86,87 @@ class Metafeatures(object):
         if timeout is not None:
             timeout = timeout - self.TIMEOUT_BUFFER
 
-        self._threadsafe_timeout_function(
-            self._compute,
-            (
-                X, Y, column_types, metafeature_ids, sample_rows,
-                sample_columns, seed
-            ),
-            timeout,
-            metafeature_ids
+        self._compute(
+            X, Y, column_types, metafeature_ids, sample_rows, 
+            sample_columns, seed, timeout
         )
+
+        # self._threadsafe_timeout_function(
+        #     self._compute,
+        #     (
+        #         X, Y, column_types, metafeature_ids, sample_rows,
+        #         sample_columns, seed
+        #     ),
+        #     timeout,
+        #     metafeature_ids
+        # )
 
         if not self.queue.empty():
             self.computed_metafeatures = self.queue.get()
+            print(self.computed_metafeatures)
             for x in range(self.queue.qsize()):
                 mf, value = self.queue.get()
                 self.computed_metafeatures.at[0, mf] = value
 
         return self.computed_metafeatures
 
-    def _threadsafe_timeout_function(self, f, args, timeout, metafeature_ids):
-        p = multiprocessing.Process(target=f, args=args)
-        p.start()
-        try:
-            p.join(timeout)
-            if p.is_alive():
-                p.terminate()
-                p.join()
-        except multiprocessing.TimeoutError:
-            print("timeout")        
+    # def _threadsafe_timeout_function(self, f, args, timeout, metafeature_ids):
+    #     p = multiprocessing.Process(target=f, args=args)
+    #     p.start()
+    #     try:
+    #         p.join(timeout)
+    #         if p.is_alive():
+    #             p.terminate()
+    #             p.join()
+    #     except multiprocessing.TimeoutError:
+    #         print("timeout")        
 
-        if not self.error.empty():
-            raise self.error.get()
+    #     if not self.error.empty():
+    #         raise self.error.get()
 
     def _compute(
         self, X, Y, column_types, metafeature_ids, sample_rows, sample_columns,
-        seed
+        seed, timeout
     ):
-        try:
-            self._validate_compute_arguments(
-                X, Y, column_types, metafeature_ids, sample_rows, sample_columns,
-                seed
-            )
-            if column_types is None:
-                column_types = self._infer_column_types(X, Y)
+        self._validate_compute_arguments(
+            X, Y, column_types, metafeature_ids, sample_rows, sample_columns,
+            seed
+        )
+        if column_types is None:
+            column_types = self._infer_column_types(X, Y)
 
-            if metafeature_ids is None:
-                metafeature_ids = self.list_metafeatures()
-            self._validate_compute_arguments(
-                X, Y, column_types, metafeature_ids, sample_rows, sample_columns,
-                seed
-            )
-        
+        if metafeature_ids is None:
+            metafeature_ids = self.list_metafeatures()
+
+        if timeout is not None:
             initialized_df = DataFrame({name:["TIMEOUT"] for name in (metafeature_ids + [name+"_Time" for name in metafeature_ids])})
-            self.queue.put(initialized_df)
+        else:
+            initialized_df = DataFrame()
+        self.queue.put(initialized_df)
+        self._validate_compute_arguments(
+            X, Y, column_types, metafeature_ids, sample_rows, sample_columns,
+            seed
+        )
 
-            X_raw = X
-            X = X_raw.dropna(axis=1, how='all')
-            self._set_random_seed(seed)
-            self.resource_results_dict = {
-                'XRaw': {self.VALUE_NAME: X_raw, self.TIME_NAME: 0.},
-                'X': {self.VALUE_NAME: X, self.TIME_NAME: 0.},
-                'Y': {self.VALUE_NAME: Y, self.TIME_NAME: 0.},
-                'ColumnTypes': {self.VALUE_NAME: column_types, self.TIME_NAME: 0.},
-                'SampleRowsFlag': {
-                    self.VALUE_NAME: sample_rows, self.TIME_NAME: 0.
-                },
-                'SampleColumnsFlag': {
-                    self.VALUE_NAME: sample_columns, self.TIME_NAME: 0.
-                }
+        X_raw = X
+        X = X_raw.dropna(axis=1, how='all')
+        self._set_random_seed(seed)
+        self.resource_results_dict = {
+            'XRaw': {self.VALUE_NAME: X_raw, self.TIME_NAME: 0.},
+            'X': {self.VALUE_NAME: X, self.TIME_NAME: 0.},
+            'Y': {self.VALUE_NAME: Y, self.TIME_NAME: 0.},
+            'ColumnTypes': {self.VALUE_NAME: column_types, self.TIME_NAME: 0.},
+            'SampleRowsFlag': {
+                self.VALUE_NAME: sample_rows, self.TIME_NAME: 0.
+            },
+            'SampleColumnsFlag': {
+                self.VALUE_NAME: sample_columns, self.TIME_NAME: 0.
             }
-            self._compute_metafeatures(metafeature_ids)
-        except Exception as e:
-            self.error.put(e)     
+        }
+        # self._compute_metafeatures(metafeature_ids)
+        pool = multiprocessing.Pool()
+        res = pool.map_async(self._retrieve_resource, metafeature_ids)
+        res.wait(timeout=timeout)
 
     def _set_random_seed(self, seed):
         if seed is None:
@@ -219,11 +228,13 @@ class Metafeatures(object):
         return column_types
 
     def _compute_metafeatures(self, metafeature_ids):
-        for metafeature_id in metafeature_ids:
-            value, time_value = self._retrieve_resource(metafeature_id)
-            self.queue.put((metafeature_id,value))
-            metafeature_time_id = metafeature_id + "_Time"
-            self.queue.put((metafeature_time_id,time_value))
+        pass
+        # for metafeature_id in metafeature_ids:
+        #     value, time_value = self._retrieve_resource(metafeature_id)
+        #     self.queue.put(pool.apply_async(self.retreive_resource, (metafeature_id,)).get())
+            # self.queue.put((metafeature_id,value))
+            # metafeature_time_id = metafeature_id + "_Time"
+            # self.queue.put((metafeature_time_id,time_value))
             
 
     def _retrieve_resource(self, resource_name):
@@ -254,7 +265,9 @@ class Metafeatures(object):
                 }
         value = self.resource_results_dict[resource_name][self.VALUE_NAME]
         total_time = self.resource_results_dict[resource_name][self.TIME_NAME]
-        return (value, total_time)
+        self.queue.put((resource_name, value))
+        self.queue.put((resource_name+"_Time", total_time))
+        return (resource_name, value, total_time)
 
     def _retrieve_parameters(self, resource_name):
         total_time = 0.0
