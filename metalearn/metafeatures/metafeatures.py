@@ -37,6 +37,7 @@ class Metafeatures(object):
     def __init__(self):
         self.queue = multiprocessing.Manager().Queue()
         self.error = multiprocessing.Manager().Queue()
+        self.dict = multiprocessing.Manager().dict()
         self.resource_info_dict = {}
         self.metafeatures_list = []
         mf_info_file_path = os.path.splitext(__file__)[0] + '.json'
@@ -100,12 +101,12 @@ class Metafeatures(object):
         #     timeout,
         #     metafeature_ids
         # )
-
         if not self.queue.empty():
             self.computed_metafeatures = self.queue.get()
-            print(self.computed_metafeatures)
+            # print(self.computed_metafeatures)
             for x in range(self.queue.qsize()):
                 mf, value = self.queue.get()
+                # print("name: {} \t value: {}".format(mf, value))
                 self.computed_metafeatures.at[0, mf] = value
 
         return self.computed_metafeatures
@@ -163,10 +164,11 @@ class Metafeatures(object):
             }
         }
         # self._compute_metafeatures(metafeature_ids)
+        # print(metafeature_ids)
         pool = multiprocessing.Pool()
-        res = pool.map_async(self._retrieve_resource, metafeature_ids)
+        res = pool.map_async(self._compute_metafeatures, metafeature_ids)
         res.wait(timeout=timeout)
-
+        # print(self.dict)
     def _set_random_seed(self, seed):
         if seed is None:
             self.seed = np.random.randint(2**32)
@@ -228,14 +230,14 @@ class Metafeatures(object):
             column_types[Y.name] = self.CATEGORICAL
         return column_types
 
-    def _compute_metafeatures(self, metafeature_ids):
-        pass
-        # for metafeature_id in metafeature_ids:
-        #     value, time_value = self._retrieve_resource(metafeature_id)
-        #     self.queue.put(pool.apply_async(self.retreive_resource, (metafeature_id,)).get())
-            # self.queue.put((metafeature_id,value))
-            # metafeature_time_id = metafeature_id + "_Time"
-            # self.queue.put((metafeature_time_id,time_value))
+    def _compute_metafeatures(self, metafeature_id):
+        value, time_value = self._retrieve_resource(metafeature_id)
+        self.dict[metafeature_id] = value
+        self.queue.put((metafeature_id,value))
+        metafeature_time_id = metafeature_id + "_Time"
+        self.dict[metafeature_time_id] = time_value
+        self.queue.put((metafeature_time_id, time_value))
+
             
 
     def _retrieve_resource(self, resource_name):
@@ -266,9 +268,7 @@ class Metafeatures(object):
                 }
         value = self.resource_results_dict[resource_name][self.VALUE_NAME]
         total_time = self.resource_results_dict[resource_name][self.TIME_NAME]
-        self.queue.put((resource_name, value))
-        self.queue.put((resource_name+"_Time", total_time))
-        return (resource_name, value, total_time)
+        return (value, total_time)
 
     def _retrieve_parameters(self, resource_name):
         total_time = 0.0

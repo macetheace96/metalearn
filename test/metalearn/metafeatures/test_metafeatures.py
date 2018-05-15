@@ -295,7 +295,8 @@ class MetaFeaturesTestCase(unittest.TestCase):
             )
 
 def metafeatures_suite():
-    test_cases = [MetaFeaturesTestCase, MetaFeaturesWithDataTestCase]
+    # test_cases = [MetaFeaturesTestCase, MetaFeaturesWithDataTestCase]
+    test_cases = [MetaFeaturesWithDataTestCase]
     return unittest.TestSuite(map(unittest.TestLoader().loadTestsFromTestCase, test_cases))
     # suite = unittest.TestSuite()
     # suite.addTest(MetaFeaturesTestCase("test_dataframe_input_error"))
