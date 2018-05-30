@@ -165,7 +165,7 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
                 start_time = time.time()
                 df = mf.compute(X=dataset["X"], Y=dataset["Y"], timeout=timeout)
                 compute_time = time.time() - start_time
-                print(df)
+                # print(df)
                 print("Total Run Time: {}".format(compute_time))
                 # self.assertGreater(timeout, compute_time, "computing metafeatures exceeded max time. dataset: '{}', max time: {}, actual time: {}".format(filename, timeout, compute_time))
                 # self.assertEqual(df.shape[1], 2*len(Metafeatures().list_metafeatures()), "Some metafeatures were not returned...")
