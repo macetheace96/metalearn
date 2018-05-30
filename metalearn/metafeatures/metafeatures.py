@@ -93,7 +93,6 @@ class Metafeatures(object):
                 sample_columns, seed
             ),
             timeout,
-            metafeature_ids
         )
 
         if not self.queue.empty():
@@ -104,18 +103,16 @@ class Metafeatures(object):
 
         return self.computed_metafeatures
 
-    def _threadsafe_timeout_function(self, f, args, timeout, metafeature_ids):
+    def _threadsafe_timeout_function(self, f, args, timeout):
         p = multiprocessing.Process(target=f, args=args)
         p.start()
         try:
             p.join(timeout)
             if p.is_alive():
                 p.terminate()
-                p.join()
+                p.join()     
         except multiprocessing.TimeoutError:
-            print("timeout")
-        except:
-            raise        
+            pass
 
         if not self.error.empty():
             raise self.error.get()
