@@ -31,7 +31,7 @@ class Metafeatures(object):
 
     VALUE_NAME = 'value'
     TIME_NAME = 'time'
-    TIMEOUT_BUFFER = .1
+    TIMEOUT_BUFFER = .2
     NUMERIC = "NUMERIC"
     CATEGORICAL = "CATEGORICAL"
 
@@ -60,7 +60,7 @@ class Metafeatures(object):
     def compute(
         self, X: DataFrame, Y: Series, column_types: Dict[str, str] = None,
         metafeature_ids: List = None, sample_rows=True, sample_columns=True,
-        seed=None, timeout=None
+        seed=None, timeout=None, num_processes=1
     ) -> DataFrame:
         """
         Parameters
@@ -86,21 +86,18 @@ class Metafeatures(object):
 
         if timeout is not None:
             timeout = timeout - self.TIMEOUT_BUFFER
+        start = time.time()
         if metafeature_ids is None:
             metafeature_ids = self.list_metafeatures()
 
+        pool = multiprocessing.Pool(num_processes)
         chunk_generator = (metafeature_ids[i:i+35] for i in range(0,len(metafeature_ids),35))
-        processes = [multiprocessing.Process(target=self._compute, args=(X,Y,column_types,chunk,sample_rows,sample_columns,seed,self.dict)) for chunk in chunk_generator]
-        
+        # processes = [pool.apply_async(func=self._compute, args=(X,Y,column_types,chunk,sample_rows,sample_columns,seed,self.dict)) for chunk in chunk_generator]
+        mp = pool.starmap_async(func=self._compute, iterable=[(X,Y,column_types,chunk,sample_rows,sample_columns,seed,self.dict) for chunk in chunk_generator])
         mf_dict = {name:"TIMEOUT" for name in (metafeature_ids + [name+"_Time" for name in metafeature_ids])}
-
-        for process in processes:
-            process.start()
-
-        processes[1].join(timeout=timeout)
-
-        for process in processes:
-            process.terminate()
+        pool.close()
+        mp.wait(timeout=timeout)
+        pool.terminate()
 
         mf_dict.update(self.dict)
 

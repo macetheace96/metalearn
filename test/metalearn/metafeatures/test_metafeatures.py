@@ -160,7 +160,7 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
         '''Tests whether the Metafeatures.compute function returns within the allotted time.'''
         for filename, dataset in self.datasets.items():
             print(filename)
-            for timeout in [3, 5, 10]:
+            for timeout in [3, 5, 10, 50]:
                 mf = Metafeatures()
                 start_time = time.time()
                 df = mf.compute(X=dataset["X"], Y=dataset["Y"], timeout=timeout)
