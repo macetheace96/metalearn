@@ -22,6 +22,10 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
     def setUp(self):
         self.datasets = {}
         self.data_folder = './test/data/'
+        self.random_seed = 0
+        with open("./metalearn/metafeatures/metafeatures.json") as fh:
+            master_list = json.load(fh)
+        self.master_names = set(master_list["metafeatures"].keys())
         with open(self.data_folder + "test_dataset_metadata.json", "r") as fh:
             dataset_descriptions = json.load(fh)
 
@@ -30,6 +34,7 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
             target_class_name = dataset_metadata["target_class_name"]
             index_col_name = dataset_metadata.get('index_col_name', None)
             X, Y, column_types = read_dataset(filename, index_col_name, target_class_name)
+
             known_dataset_metafeatures_path = get_dataset_metafeatures_path(filename)
             if os.path.exists(known_dataset_metafeatures_path):
                 with open(known_dataset_metafeatures_path) as fh:
@@ -41,15 +46,24 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
     def tearDown(self):
         del self.datasets
 
-    def process_result(self, results, test_name):
-        if not all(f == {} for f in results.values()):
-            # Results are no longer correct. Because multiple results that can be wrong are calculated at once,
-            # we want to output all of the wrong results so it might be easier to find out what went wrong.
-            results = {k:v for (k,v) in results.items() if v != {}}
-            fail_report_file = f'./test/metalearn/metafeatures/{test_name}_correctness_fails.json'
-            with open(fail_report_file,'w') as fh:
-                json.dump(results, fh, indent=4)
-            self.assertTrue(False, f"Not all metafeatures matched correct results for {test_name} test, output written to {fail_report_file}.")
+    def process_results(self, test_name, correctness=None, mf_lists=None):
+        if correctness is not None:
+            if not all(f == {} for f in correctness.values()):
+                # Results are no longer correct. Because multiple results that can be wrong are calculated at once,
+                # we want to output all of the wrong results so it might be easier to find out what went wrong.
+                correctness = {k:v for (k,v) in correctness.items() if v != {}}
+                fail_report_file = f'./test/metalearn/metafeatures/{test_name}_correctness_fails.json'
+                with open(fail_report_file,'w') as fh:
+                    json.dump(correctness, fh, indent=4)
+                self.assertTrue(False, f"Not all metafeatures matched correct results for {test_name} test, output written to {fail_report_file}.")
+
+        if mf_lists is not None:
+            if not all(i == {} for i in mf_lists.values()):
+                mf_lists = {k:v for (k,v) in mf_lists.items() if v != {}}
+                inconsistency_report_file = f'./test/metalearn/metafeatures/{test_name}_mf_list_inconsistencies.json'
+                with open(inconsistency_report_file, 'w') as fh:
+                    json.dump(mf_lists, fh, indent=4)
+                self.assertTrue(False, f"Metafeature lists do not match for {test_name}, output written to {inconsistency_report_file}.")
 
     def check_correctness(self, computed_mfs, filename):
         fails = {}
@@ -75,6 +89,36 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
 
         return fails
 
+    def check_compare_metafeature_lists(self, computed_mfs, filename):
+        inconsistencies = {}
+
+        known_mfs = self.datasets[filename]["metafeatures"]
+        inconsistencies[self.datasets[filename]["path"]] = {}
+
+        known_names_t = set({x for x in known_mfs.keys() if "_Time" in x})
+        computed_names_t = set({x for x in computed_mfs.keys() if "_Time" in x})
+        intersect_t = known_names_t.intersection(computed_names_t)
+
+        known_names_t_unique = known_names_t - intersect_t
+        computed_names_t_unique = computed_names_t - intersect_t
+
+        known_names_no_t = set({x for x in known_mfs.keys() if "_Time" not in x})
+        computed_names_no_t = set({x for x in computed_mfs.keys() if "_Time" not in x})
+        intersect = self.master_names.intersection(computed_names_no_t.intersection(known_names_no_t))
+
+        self.master_names_unique = self.master_names - intersect
+        known_names_unique = (known_names_no_t - intersect).union(known_names_t_unique)
+        computed_names_unique = (computed_names_no_t - intersect).union(computed_names_t_unique)
+
+        if len(known_names_unique) > 0:
+            inconsistencies[self.datasets[filename]["path"]]["Known Metafeatures"] = list(known_names_unique)
+        if len(computed_names_unique) > 0:
+            inconsistencies[self.datasets[filename]["path"]]["Computed Metafeatures"] = list(computed_names_unique)
+        if len(self.master_names_unique) > 0:
+            inconsistencies[self.datasets[filename]["path"]]["Master List Metafeatures"] = list(self.master_names_unique)
+
+        return inconsistencies
+
     def test_run_without_fail(self):
         for filename, dataset in self.datasets.items():
             metafeatures_df = Metafeatures().compute(X=dataset["X"],Y=dataset["Y"])
@@ -83,63 +127,17 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
 
     def test_default(self):
         """Test Metafeatures().compute() with default parameters"""
-        random_seed = 0
-
-        fails = {}
+        correctness = {}
+        mf_lists = {}
         for filename, dataset in self.datasets.items():
 
-            metafeatures_df = Metafeatures().compute(X=dataset["X"],Y=dataset["Y"],seed=random_seed)
+            metafeatures_df = Metafeatures().compute(X=dataset["X"],Y=dataset["Y"],seed=self.random_seed)
             computed_mfs = metafeatures_df.to_dict('records')[0]
-            fails.update(self.check_correctness(computed_mfs, filename))
 
-        self.process_result(fails, "default")
+            correctness.update(self.check_correctness(computed_mfs, filename))
+            mf_lists.update(self.check_compare_metafeature_lists(computed_mfs, filename))
 
-    def test_compare_metafeature_lists(self):
-        inconsistencies = {}
-        with open("./metalearn/metafeatures/metafeatures.json") as fh:
-            master_list = json.load(fh)
-        master_names = set(master_list["metafeatures"].keys())
-        for filename, dataset in self.datasets.items():
-            known_dataset_metafeatures_path = get_dataset_metafeatures_path(filename)
-
-            if os.path.exists(known_dataset_metafeatures_path):
-                with open(known_dataset_metafeatures_path) as fh:
-                    known_mfs = json.load(fh)
-
-                inconsistencies[known_dataset_metafeatures_path] = {}
-
-                metafeatures_df = Metafeatures().compute(X=dataset["X"],Y=dataset["Y"])
-                computed_mfs = metafeatures_df.to_dict('records')[0]
-
-                known_names_t = set({x for x in known_mfs.keys() if "_Time" in x})
-                computed_names_t = set({x for x in computed_mfs.keys() if "_Time" in x})
-                intersect_t = known_names_t.intersection(computed_names_t)
-
-                known_names_t_unique = known_names_t - intersect_t
-                computed_names_t_unique = computed_names_t - intersect_t
-
-                known_names_no_t = set({x for x in known_mfs.keys() if "_Time" not in x})
-                computed_names_no_t = set({x for x in computed_mfs.keys() if "_Time" not in x})
-                intersect = master_names.intersection(computed_names_no_t.intersection(known_names_no_t))
-
-                master_names_unique = master_names - intersect
-                known_names_unique = (known_names_no_t - intersect).union(known_names_t_unique)
-                computed_names_unique = (computed_names_no_t - intersect).union(computed_names_t_unique)
-
-                if len(known_names_unique) > 0:
-                    inconsistencies[known_dataset_metafeatures_path]["Known Metafeatures"] = list(known_names_unique)
-                if len(computed_names_unique) > 0:
-                    inconsistencies[known_dataset_metafeatures_path]["Computed Metafeatures"] = list(computed_names_unique)
-                if len(master_names_unique) > 0:
-                    inconsistencies[known_dataset_metafeatures_path]["Master List Metafeatures"] = list(master_names_unique)
-
-        self.assertGreater(len(inconsistencies), 0, "No known results could be loaded, metafeature lists could not be compared.")
-        if not all(i == {} for i in inconsistencies.values()):
-            inconsistencies = {k:v for (k,v) in inconsistencies.items() if v != {}}
-            inconsistency_report_file = './test/metalearn/metafeatures/mf_inconsistencies.json'
-            with open(inconsistency_report_file, 'w') as fh:
-                json.dump(inconsistencies, fh, indent=4)
-            self.assertTrue(False, "Metafeature lists do not match, output written to {}.".format(inconsistency_report_file))
+        self.process_results("default", correctness, mf_lists)
 
     def _is_target_dependent(self, resource_name):
         if resource_name=='Y':
@@ -179,42 +177,39 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
         return target_dependent_metafeatures
 
     def test_no_targets(self):
-        """ Test Metafeatures().compute() without targets
-        """
-        random_seed = 0
-        fails = {}
+        """ Test Metafeatures().compute() without targets"""
+        correctness = {}
         for filename, dataset in self.datasets.items():
-            computed_mfs = Metafeatures().compute(X=dataset["X"],Y=None,seed=random_seed).to_dict('records')[0]
+            computed_mfs = Metafeatures().compute(X=dataset["X"],Y=None,seed=self.random_seed).to_dict('records')[0]
             self.assertEqual(len(Metafeatures().list_metafeatures()*2), len(computed_mfs), "Computed metafeature list does not match correct metafeature list for no_targets test.")
 
             target_dependent_metafeatures = self._get_target_dependent_metafeatures()
             for mf in target_dependent_metafeatures:
                 if not computed_mfs[mf] == 'NO_TARGETS':
-                    fails[self.datasets[filename]["path"]][mf] = ('NO_TARGETS', computed_value)
+                    correctness[self.datasets[filename]["path"]][mf] = ('NO_TARGETS', computed_value)
                 del computed_mfs[mf]
             
-            fails.update(self.check_correctness(computed_mfs, filename))
+            correctness.update(self.check_correctness(computed_mfs, filename))
 
-        self.process_result(fails, "no_targets")
-
+        self.process_results("no_targets", correctness)
 
     def test_timeout(self):
         '''Tests Metafeatures().compute() with timeout set'''
         for timeout in [3, 5, 10]:
-            fails = {}
+            correctness = {}
             for filename, dataset in self.datasets.items():
                 mf = Metafeatures()
                 start_time = time.time()
-                df = mf.compute(X=dataset["X"], Y=dataset["Y"], timeout=timeout, seed=0)
+                df = mf.compute(X=dataset["X"], Y=dataset["Y"], timeout=timeout, seed=self.random_seed)
                 compute_time = time.time() - start_time
 
                 computed_mfs = {k:v for k,v in df.to_dict('records')[0].items() if "_Time" not in k and v != "TIMEOUT"}
-                fails.update(self.check_correctness(computed_mfs, filename))
+                correctness.update(self.check_correctness(computed_mfs, filename))
     
                 self.assertGreater(timeout, compute_time, f"computing metafeatures exceeded max time. dataset: '{filename}', max time: {timeout}, actual time: {compute_time}")
                 self.assertEqual(df.shape[1], 2*len(Metafeatures().list_metafeatures()), "Some metafeatures were not returned...")
 
-            self.process_result(fails, "timeout"+str(timeout))
+            self.process_results("timeout"+str(timeout), correctness)
 
 class MetaFeaturesTestCase(unittest.TestCase):
     """ Contains tests for MetaFeatures that can be executed without loading data. """
