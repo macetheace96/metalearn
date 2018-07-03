@@ -7,6 +7,7 @@ import queue
 from contextlib import redirect_stderr
 import io
 from typing import Dict, List
+import logging
 
 import numpy as np
 import pandas as pd
@@ -21,6 +22,9 @@ from .simple_metafeatures import *
 from .statistical_metafeatures import *
 from .information_theoretic_metafeatures import *
 from .landmarking_metafeatures import *
+
+logging.basicConfig(level=os.environ.get("LOGLEVEL", "INFO"))
+log = logging.getLogger("Metafeatures.py")
 
 class Metafeatures(object):
     """
@@ -37,6 +41,7 @@ class Metafeatures(object):
     CATEGORICAL = "CATEGORICAL"
     TIMEOUT = "TIMEOUT"
     NO_TARGETS = "NO_TARGETS"
+
 
     def __init__(self):
         self.queue = multiprocessing.Queue()
@@ -63,7 +68,7 @@ class Metafeatures(object):
     def compute(
         self, X: DataFrame, Y: Series = None, column_types: Dict[str, str] = None,
         metafeature_ids: List = None, sample_rows=True, sample_columns=True,
-        seed=None, timeout=None
+        seed=None, timeout=None, verbose=True
     ) -> DataFrame:
         """
         Parameters
@@ -95,7 +100,7 @@ class Metafeatures(object):
             self._compute,
             (
                 X, Y, column_types, metafeature_ids, sample_rows,
-                sample_columns, seed
+                sample_columns, seed, verbose
             ),
             timeout,
         )
@@ -156,10 +161,12 @@ class Metafeatures(object):
 
     def _compute(
         self, X, Y, column_types, metafeature_ids, sample_rows, sample_columns,
-        seed
+        seed, verbose
     ):
+        self.v_print = print if verbose else lambda *a, **k: None
 
         try:
+            self.v_print("Validating arguments:")
             self._validate_compute_arguments(
                 X, Y, column_types, metafeature_ids, sample_rows, sample_columns,
                 seed
@@ -200,6 +207,7 @@ class Metafeatures(object):
                         self.queue.put((metafeature_time_id,self.NO_TARGETS))
                 # remove any target-dependent metafeatures from metafeature_ids so there is no attempt to compute them
                 metafeature_ids = [mf for mf in metafeature_ids if mf not in target_dependent_metafeatures]
+            self.v_print("Computing metafeatures:")
             self._compute_metafeatures(metafeature_ids)
         except Exception as e:
             self.error.put(e)
@@ -275,6 +283,7 @@ class Metafeatures(object):
 
     def _compute_metafeatures(self, metafeature_ids):
         for metafeature_id in metafeature_ids:
+            self.v_print(f"  {metafeature_id}")
             value, time_value = self._retrieve_resource(metafeature_id)
             self.queue.put((metafeature_id,value))
             metafeature_time_id = metafeature_id + "_Time"
