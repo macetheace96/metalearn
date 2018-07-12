@@ -104,7 +104,7 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
             test_failures = {filename: {"correctness": test_failures}}
         return test_failures
 
-    def _test_compare_metafeature_lists(self, computed_mfs, known_mfs, test_name):
+    def _check_compare_metafeature_lists(self, computed_mfs, known_mfs, filename):
         """
         Tests whether computed_mfs matches the list of previously computed metafeature
         names as well as the list of computable metafeatures in Metafeatures.list_metafeatures
@@ -136,14 +136,8 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
             test_failures["Master List Metafeatures"] = list(master_names_unique)
 
         if test_failures != {}:
-            failure_report_path = f"./compare_mf_lists_{test_name}.json"
-            with open(failure_report_path, "w") as fh:
-                json.dump(test_failures, fh, indent=4)
-            self.assertTrue(
-                False,
-                f"{test_name} computed an incorrect number of metafeatures. " +\
-                f"Details have been written in {failure_report_path}."
-            )
+            test_failures = {filename: {"compare_mf_lists": test_failures}}
+        return test_failures
 
     def _perform_checks(self, functions):
         check = {}
@@ -169,10 +163,11 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
             )
             computed_mfs = metafeatures_df.to_dict("records")[0]
             if dataset_filename == "38_sick_train_data.csv":
-                computed_mfs["MaxCategoricalAttributeEntropy"] = 0
+                del computed_mfs["MaxCategoricalAttributeEntropy"]
             known_mfs = dataset["known_metafeatures"]
 
             required_checks = {self._check_correctness: [computed_mfs, known_mfs, dataset_filename],
+                               self._check_compare_metafeature_lists: [computed_mfs, known_mfs, dataset_filename],
                                self._check_temp: [dataset_filename]
                                }
             test_failures.update(self._perform_checks(required_checks))
@@ -235,17 +230,11 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
             if dataset_filename == "small_test_dataset.arff":
                 computed_mfs["MaxCategoricalAttributeEntropy"] = 0
 
-            n_computed_mfs = len(computed_mfs)
-            n_computable_mfs = len(metafeatures.list_metafeatures())
-
             required_checks = {self._check_correctness: [computed_mfs, known_mfs, dataset_filename],
+                               self._check_compare_metafeature_lists: [computed_mfs, known_mfs, dataset_filename],
                                self._check_temp: [dataset_filename]
                                }
             test_failures.update(self._perform_checks(required_checks))
-            self.assertEqual(
-                2 * n_computable_mfs, n_computed_mfs,
-                f"{test_name} computed an incorrect number of metafeatures"
-            )
 
         self._process_results(test_failures, test_name)
 
