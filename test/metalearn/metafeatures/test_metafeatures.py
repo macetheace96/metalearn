@@ -28,15 +28,18 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
             filename = dataset_metadata["filename"]
             target_class_name = dataset_metadata["target_class_name"]
             index_col_name = dataset_metadata.get('index_col_name', None)
-            X, Y, column_types = read_dataset(filename, index_col_name, target_class_name)
-            self.datasets[filename] = {"X": X, "Y": Y}
+            column_types = dataset_metadata.get("column_types", None)
+            X, Y, _ = read_dataset(filename, index_col_name, target_class_name)
+            self.datasets[filename] = {"X": X, "Y": Y, "column_types": column_types}
 
     def tearDown(self):
         del self.datasets
 
     def test_run_without_fail(self):
         for filename, dataset in self.datasets.items():
-            metafeatures_df = Metafeatures().compute(X=dataset["X"],Y=dataset["Y"])
+            metafeatures_df = Metafeatures().compute(
+                X=dataset["X"],Y=dataset["Y"], column_types=dataset["column_types"]
+            )
             metafeatures_dict = metafeatures_df.to_dict('records')[0]
             # print(json.dumps(metafeatures_dict, sort_keys=True, indent=4))
 
@@ -56,7 +59,9 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
                 # Explicitly create empty dict because this provides information about successful tests.
                 fails[known_dataset_metafeatures_path] = {}
 
-                metafeatures_df = Metafeatures().compute(X=dataset["X"],Y=dataset["Y"],seed=random_seed)
+                metafeatures_df = Metafeatures().compute(
+                    X=dataset["X"],Y=dataset["Y"],seed=random_seed, column_types=dataset["column_types"]
+                )
                 computed_mfs = metafeatures_df.to_dict('records')[0]
                 for key, value in computed_mfs.items():
                     if 'int' in str(type(value)):
@@ -101,7 +106,9 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
 
                 inconsistencies[known_dataset_metafeatures_path] = {}
 
-                metafeatures_df = Metafeatures().compute(X=dataset["X"],Y=dataset["Y"])
+                metafeatures_df = Metafeatures().compute(
+                    X=dataset["X"], Y=dataset["Y"], column_types=dataset["column_types"]
+                )
                 computed_mfs = metafeatures_df.to_dict('records')[0]
 
                 known_names_t = set({x for x in known_mfs.keys() if "_Time" in x})
@@ -185,7 +192,10 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
                 fails[known_dataset_metafeatures_path] = {}
                 inconsistencies[known_dataset_metafeatures_path] = {}
 
-                metafeatures_df = Metafeatures().compute(X=dataset["X"],Y=None,seed=random_seed)
+                column_types = {k: v for k, v in dataset["column_types"].items() if not k == dataset["Y"].name}
+                metafeatures_df = Metafeatures().compute(
+                    X=dataset["X"], Y=None, seed=random_seed, column_types=column_types
+                )
                 computed_mfs = metafeatures_df.to_dict('records')[0]
                 self.assertEqual(len(known_mfs), len(computed_mfs), "Computed metafeature list does not match correct metafeature list for no_targets test.")
                 
@@ -224,7 +234,9 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
             for timeout in [3,5,10]:
                 mf = Metafeatures()
                 start_time = time.time()
-                df = mf.compute(X=dataset["X"], Y=dataset["Y"], timeout=timeout, seed=0)
+                df = mf.compute(
+                    X=dataset["X"], Y=dataset["Y"], timeout=timeout, seed=0, column_types=dataset["column_types"]
+                )
                 compute_time = time.time() - start_time
                 if not known_mfs is None:
                     for mf_name, mf_value in df.to_dict('records')[0].items():
