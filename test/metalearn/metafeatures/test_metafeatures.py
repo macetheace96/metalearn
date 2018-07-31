@@ -16,6 +16,8 @@ from test.config import CORRECTNESS_SEED, METADATA_PATH
 from test.data.dataset import read_dataset
 from test.data.compute_dataset_metafeatures import get_dataset_metafeatures_path
 
+FAIL_MESSAGE = "message"
+FAIL_REPORT = "report"
 
 class MetaFeaturesWithDataTestCase(unittest.TestCase):
     """ Contains tests for MetaFeatures that require loading data first. """
@@ -49,10 +51,10 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
         if test_failures != {}:
             failure_report_path = f"./failures_{test_name}.json"
             with open(failure_report_path, "w") as fh:
-                json.dump(test_failures, fh, indent=4)
+                json.dump(test_failures[FAIL_REPORT], fh, indent=4)
             self.assertTrue(
                 False,
-                "Some metafeatures were computed incorrectly. " + \
+                test_failures[FAIL_MESSAGE] + " " +\
                 f"Details have been written in {failure_report_path}."
             )
 
@@ -65,6 +67,7 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
         computable metafeatures were computed.
         """
         test_failures = {}
+        fail_message = "Not all metafeatures matched previous results."
 
         # Since timing metafeatures are always different, ignore them
         computed_mfs = {
@@ -98,7 +101,10 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
                 }
 
         if test_failures != {}:
-            test_failures = {filename: {"correctness": test_failures}}
+            test_failures = {
+                FAIL_MESSAGE: fail_message,
+                FAIL_REPORT: {filename: {"correctness": test_failures}},
+            }
         return test_failures
 
     def _check_compare_metafeature_lists(self, computed_mfs, known_mfs, filename):
@@ -107,6 +113,7 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
         names as well as the list of computable metafeatures in Metafeatures.list_metafeatures
         """
         test_failures = {}
+        fail_message = "Metafeature lists do not match."
 
         master_names = set(Metafeatures().list_metafeatures())
 
@@ -133,7 +140,10 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
             test_failures["Master List Metafeatures"] = list(master_names_unique)
 
         if test_failures != {}:
-            test_failures = {filename: {"compare_mf_lists": test_failures}}
+            test_failures = {
+                FAIL_MESSAGE: fail_message,
+                FAIL_REPORT: {filename: {"compare_mf_lists": test_failures}},
+            }
         return test_failures
 
     def _perform_checks(self, functions):
@@ -149,9 +159,9 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
             Metafeatures().compute(X=dataset["X"], Y=dataset["Y"])
 
     def test_correctness(self):
+        """Tests that metafeatures are computed correctly, for known datasets.
         """
-        Tests that metafeatures are computed correctly, for known datasets.
-        """
+        required_checks = {}
         test_failures = {}
         test_name = inspect.stack()[0][3]
         for dataset_filename, dataset in self.datasets.items():
@@ -162,6 +172,9 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
             known_mfs = dataset["known_metafeatures"]
 
             required_checks[self._check_correctness] = [computed_mfs, known_mfs, dataset_filename]
+            required_checks[self._check_compare_metafeature_lists] = [
+                computed_mfs, known_mfs, dataset_filename
+            ]
             test_failures.update(self._perform_checks(required_checks))
 
         self._report_test_failures(test_failures, test_name)
@@ -206,6 +219,7 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
     def test_no_targets(self):
         """ Test Metafeatures().compute() without targets
         """
+        required_checks = {}
         test_failures = {}
         test_name = inspect.stack()[0][3]
         for dataset_filename, dataset in self.datasets.items():
@@ -219,16 +233,11 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
             for mf_name in target_dependent_metafeatures:
                 known_mfs[mf_name] = Metafeatures.NO_TARGETS
 
-            n_computed_mfs = len(computed_mfs)
-            n_computable_mfs = len(metafeatures.list_metafeatures())
-
             required_checks[self._check_correctness] = [computed_mfs, known_mfs, dataset_filename]
+            required_checks[self._check_compare_metafeature_lists] = [
+                computed_mfs, known_mfs, dataset_filename
+            ]
             test_failures.update(self._perform_checks(required_checks))
-
-            self.assertEqual(
-                2 * n_computable_mfs, n_computed_mfs,
-                f"{test_name} computed an incorrect number of metafeatures"
-            )
 
         self._report_test_failures(test_failures, test_name)
 
