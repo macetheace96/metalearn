@@ -45,7 +45,7 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
     def tearDown(self):
         del self.datasets
 
-    def _process_results(self, test_failures, test_name):
+    def _report_test_failures(self, test_failures, test_name):
         if test_failures != {}:
             failure_report_path = f"./failures_{test_name}.json"
             with open(failure_report_path, "w") as fh:
@@ -55,9 +55,6 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
                 "Some metafeatures were computed incorrectly. " + \
                 f"Details have been written in {failure_report_path}."
             )
-
-    def _check_temp(self, filename):
-        return {filename: {"temp": "temporary placeholder to check if the refactored functionality works"}}
 
     def _check_correctness(self, computed_mfs, known_mfs, filename):
         """
@@ -162,17 +159,12 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
                 X=dataset["X"], Y=dataset["Y"], seed=CORRECTNESS_SEED
             )
             computed_mfs = metafeatures_df.to_dict("records")[0]
-            if dataset_filename == "38_sick_train_data.csv":
-                del computed_mfs["MaxCategoricalAttributeEntropy"]
             known_mfs = dataset["known_metafeatures"]
 
-            required_checks = {self._check_correctness: [computed_mfs, known_mfs, dataset_filename],
-                               self._check_compare_metafeature_lists: [computed_mfs, known_mfs, dataset_filename],
-                               self._check_temp: [dataset_filename]
-                               }
+            required_checks[self._check_correctness] = [computed_mfs, known_mfs, dataset_filename]
             test_failures.update(self._perform_checks(required_checks))
 
-        self._process_results(test_failures, test_name)
+        self._report_test_failures(test_failures, test_name)
 
     def _is_target_dependent(self, resource_name):
         if resource_name == "Y":
@@ -227,16 +219,18 @@ class MetaFeaturesWithDataTestCase(unittest.TestCase):
             for mf_name in target_dependent_metafeatures:
                 known_mfs[mf_name] = Metafeatures.NO_TARGETS
 
-            if dataset_filename == "small_test_dataset.arff":
-                computed_mfs["MaxCategoricalAttributeEntropy"] = 0
+            n_computed_mfs = len(computed_mfs)
+            n_computable_mfs = len(metafeatures.list_metafeatures())
 
-            required_checks = {self._check_correctness: [computed_mfs, known_mfs, dataset_filename],
-                               self._check_compare_metafeature_lists: [computed_mfs, known_mfs, dataset_filename],
-                               self._check_temp: [dataset_filename]
-                               }
+            required_checks[self._check_correctness] = [computed_mfs, known_mfs, dataset_filename]
             test_failures.update(self._perform_checks(required_checks))
 
-        self._process_results(test_failures, test_name)
+            self.assertEqual(
+                2 * n_computable_mfs, n_computed_mfs,
+                f"{test_name} computed an incorrect number of metafeatures"
+            )
+
+        self._report_test_failures(test_failures, test_name)
 
     # temporarily remove timeout due to broken pipe bug
     def _test_timeout(self):
@@ -395,8 +389,7 @@ class MetaFeaturesTestCase(unittest.TestCase):
 
 
 def metafeatures_suite():
-    # test_cases = [MetaFeaturesTestCase, MetaFeaturesWithDataTestCase]
-    test_cases = [MetaFeaturesWithDataTestCase]
+    test_cases = [MetaFeaturesTestCase, MetaFeaturesWithDataTestCase]
     return unittest.TestSuite(map(unittest.TestLoader().loadTestsFromTestCase, test_cases))
 
 
@@ -488,8 +481,8 @@ def compare_with_openml(dataframe, omlMetafeatures):
 
     # print shared metafeature comparison
     print("Shared metafeature comparison")
-    pd.set_option('display.max_columns', 500)
-    pd.set_option('display.width', 1000)
+    pd.set_option("display.max_columns", 500)
+    pd.set_option("display.width", 1000)
 
     sharedMf.sort_values("Similar?", ascending=False, axis=0, inplace=True)
 
