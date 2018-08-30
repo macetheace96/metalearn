@@ -8,7 +8,6 @@ import random
 import time
 import unittest
 
-# import openml
 import pandas as pd
 import numpy as np
 
@@ -19,6 +18,7 @@ from test.data.compute_dataset_metafeatures import get_dataset_metafeatures_path
 
 FAIL_MESSAGE = "message"
 FAIL_REPORT = "report"
+TEST_NAME = "test_name"
 
 class MetafeaturesWithDataTestCase(unittest.TestCase):
     """ Contains tests for Metafeatures that require loading data first. """
@@ -37,9 +37,9 @@ class MetafeaturesWithDataTestCase(unittest.TestCase):
                 with open(known_dataset_metafeatures_path) as fh:
                     metafeatures = json.load(fh)
                 self.datasets[filename] = {
-                    "X": X, "Y": Y, "known_metafeatures": metafeatures,
-                    "known_metafeatures_path": known_dataset_metafeatures_path,
-                    "test": {}
+                    "X": X, "Y": Y, "column_types": column_types,
+                    "known_metafeatures": metafeatures,
+                    "known_metafeatures_path": known_dataset_metafeatures_path
                 }
             else:
                 raise FileNotFoundError(f"{known_dataset_metafeatures_path} does not exist")
@@ -49,13 +49,12 @@ class MetafeaturesWithDataTestCase(unittest.TestCase):
 
     def _report_test_failures(self, test_failures, test_name):
         if test_failures != {}:
-            failure_report_path = f"./failures_{test_name}.json"
-            with open(failure_report_path, "w") as fh:
-                json.dump(test_failures[FAIL_REPORT], fh, indent=4)
-            self.assertTrue(
-                False,
-                test_failures[FAIL_MESSAGE] + " " +\
-                f"Details have been written in {failure_report_path}."
+            report_path = f"./failures_{test_name}.json"
+            with open(report_path, "w") as fh:
+                json.dump(test_failures, fh, indent=4)
+            message = next(iter(test_failures.values()))[FAIL_MESSAGE]
+            self.fail(
+                f"{message} Details have been written in {report_path}."
             )
 
     def _check_correctness(self, computed_mfs, known_mfs, filename):
@@ -85,12 +84,23 @@ class MetafeaturesWithDataTestCase(unittest.TestCase):
                     "computed_value": computed_value
                 }
 
-        if test_failures != {}:
-            test_failures = {
-                FAIL_MESSAGE: fail_message,
-                FAIL_REPORT: {filename: {"correctness": test_failures}},
+        return self._format_check_report(
+            "correctness", fail_message, test_failures, filename
+        )
+
+    def _format_check_report(
+        self, test_name, fail_message, test_failures, filename
+    ):
+        if test_failures == {}:
+            return test_failures
+        else:
+            return {
+                filename: {
+                    TEST_NAME: test_name,
+                    FAIL_MESSAGE: fail_message,
+                    FAIL_REPORT: test_failures
+                }
             }
-        return test_failures
 
     def _check_compare_metafeature_lists(self, computed_mfs, known_mfs, filename):
         """
@@ -122,12 +132,9 @@ class MetafeaturesWithDataTestCase(unittest.TestCase):
         if len(computed_diffs) > 0:
             test_failures["computed_differences"] = list(computed_names_unique)
 
-        if test_failures != {}:
-            test_failures = {
-                FAIL_MESSAGE: fail_message,
-                FAIL_REPORT: {filename: {"compare_mf_lists": test_failures}},
-            }
-        return test_failures
+        return self._format_check_report(
+            "metafeature_lists", fail_message, test_failures, filename
+        )
 
     def _perform_checks(self, functions):
         check = {}
@@ -140,7 +147,10 @@ class MetafeaturesWithDataTestCase(unittest.TestCase):
     def test_run_without_exception(self):
         try:
             for dataset_filename, dataset in self.datasets.items():
-                Metafeatures().compute(X=dataset["X"], Y=dataset["Y"])
+                Metafeatures().compute(
+                    X=dataset["X"], Y=dataset["Y"],
+                    column_types=dataset["column_types"]
+                )
         except Exception as e:
             exc_type = type(e).__name__
             self.fail(f"computing metafeatures raised {exc_type} unexpectedly")
@@ -152,7 +162,8 @@ class MetafeaturesWithDataTestCase(unittest.TestCase):
         test_name = inspect.stack()[0][3]
         for dataset_filename, dataset in self.datasets.items():
             computed_mfs = Metafeatures().compute(
-                X=dataset["X"], Y=dataset["Y"], seed=CORRECTNESS_SEED
+                X=dataset["X"], Y=dataset["Y"], seed=CORRECTNESS_SEED,
+                column_types=dataset["column_types"]
             )
             known_mfs = dataset["known_metafeatures"]
             required_checks = {
@@ -164,6 +175,26 @@ class MetafeaturesWithDataTestCase(unittest.TestCase):
                 ]
             }
             test_failures.update(self._perform_checks(required_checks))
+
+        self._report_test_failures(test_failures, test_name)
+
+    def test_individual_metafeature_correctness(self):
+        test_failures = {}
+        test_name = inspect.stack()[0][3]
+        for dataset_filename, dataset in self.datasets.items():
+            known_mfs = dataset["known_metafeatures"]
+            for mf_id in Metafeatures.IDS:
+                computed_mfs = Metafeatures().compute(
+                    X=dataset["X"], Y=dataset["Y"], seed=CORRECTNESS_SEED,
+                    metafeature_ids=[mf_id],
+                    column_types=dataset["column_types"]
+                )
+                required_checks = {
+                    self._check_correctness: [
+                        computed_mfs, known_mfs, dataset_filename
+                    ]
+                }
+                test_failures.update(self._perform_checks(required_checks))
 
         self._report_test_failures(test_failures, test_name)
 
@@ -175,7 +206,8 @@ class MetafeaturesWithDataTestCase(unittest.TestCase):
         for dataset_filename, dataset in self.datasets.items():
             metafeatures = Metafeatures()
             computed_mfs = metafeatures.compute(
-                X=dataset["X"], Y=None, seed=CORRECTNESS_SEED
+                X=dataset["X"], Y=None, seed=CORRECTNESS_SEED,
+                column_types=dataset["column_types"]
             )
             known_mfs = dataset["known_metafeatures"]
             target_dependent_metafeatures = Metafeatures.list_metafeatures(
@@ -187,9 +219,6 @@ class MetafeaturesWithDataTestCase(unittest.TestCase):
                     Metafeatures.COMPUTE_TIME_KEY: 0.
                 }
 
-            n_computed_mfs = len(computed_mfs)
-            n_computable_mfs = len(Metafeatures.IDS)
-
             required_checks = {
                 self._check_correctness: [
                     computed_mfs, known_mfs, dataset_filename
@@ -200,9 +229,29 @@ class MetafeaturesWithDataTestCase(unittest.TestCase):
             }
             test_failures.update(self._perform_checks(required_checks))
 
+        self._report_test_failures(test_failures, test_name)
+
+    def test_request_metafeatures(self):
+        SUBSET_LENGTH = 20
+        test_failures = {}
+        test_name = inspect.stack()[0][3]
+        for dataset_filename, dataset in self.datasets.items():
+            metafeature_ids = random.sample(Metafeatures.IDS, SUBSET_LENGTH)
+            computed_mfs = Metafeatures().compute(
+                X=dataset["X"],Y=dataset["Y"], seed=CORRECTNESS_SEED,
+                metafeature_ids=metafeature_ids,
+                column_types=dataset["column_types"]
+            )
+            known_metafeatures = dataset["known_metafeatures"]
+            required_checks = {
+                self._check_correctness: [
+                    computed_mfs, known_metafeatures, dataset_filename
+                ]
+            }
+            test_failures.update(self._perform_checks(required_checks))
             self.assertEqual(
-                n_computable_mfs, n_computed_mfs,
-                f"{test_name} computed an incorrect number of metafeatures"
+                metafeature_ids, list(computed_mfs.keys()),
+                "Compute did not return requested metafeatures"
             )
         self._report_test_failures(test_failures, test_name)
 
@@ -213,7 +262,10 @@ class MetafeaturesWithDataTestCase(unittest.TestCase):
         """
         for dataset in self.datasets.values():
             X_copy, Y_copy = dataset["X"].copy(), dataset["Y"].copy()
-            Metafeatures().compute(X=dataset["X"],Y=dataset["Y"])
+            Metafeatures().compute(
+                X=dataset["X"],Y=dataset["Y"],
+                column_types=dataset["column_types"]
+            )
             if not (
                 X_copy.equals(dataset["X"]) and Y_copy.equals(dataset["Y"])
             ):
@@ -233,11 +285,13 @@ class MetafeaturesWithDataTestCase(unittest.TestCase):
             metafeatures_instance = Metafeatures()
             # first run
             metafeatures_instance.compute(
-                X=dataset["X"],Y=dataset["Y"],seed=CORRECTNESS_SEED
+                X=dataset["X"],Y=dataset["Y"],seed=CORRECTNESS_SEED,
+                column_types=dataset["column_types"]
             )
             # second run
             computed_mfs = metafeatures_instance.compute(
-                X=dataset["X"],Y=dataset["Y"],seed=CORRECTNESS_SEED
+                X=dataset["X"],Y=dataset["Y"],seed=CORRECTNESS_SEED,
+                column_types=dataset["column_types"]
             )
 
             known_mfs = dataset["known_metafeatures"]
@@ -251,12 +305,15 @@ class MetafeaturesWithDataTestCase(unittest.TestCase):
         with open("./metalearn/metafeatures/metafeatures_schema.json") as f:
             mf_schema = json.load(f)
         for dataset_filename, dataset in self.datasets.items():
-            computed_mfs = Metafeatures().compute(X=dataset["X"],Y=dataset["Y"])
+            computed_mfs = Metafeatures().compute(
+                X=dataset["X"],Y=dataset["Y"],
+                column_types=dataset["column_types"]
+            )
             try:
                 jsonschema.validate(computed_mfs, mf_schema)
             except jsonschema.exceptions.ValidationError as e:
                 self.fail(
-                    f"Metfatures computed from {dataset_filename} do not "+
+                    f"Metafeatures computed from {dataset_filename} do not "+
                     "conform to schema"
                 )
 
@@ -264,7 +321,10 @@ class MetafeaturesWithDataTestCase(unittest.TestCase):
         with open("./metalearn/metafeatures/metafeatures_schema.json") as f:
             mf_schema = json.load(f)
         for dataset_filename, dataset in self.datasets.items():
-            computed_mfs = Metafeatures().compute(X=dataset["X"],Y=dataset["Y"])
+            computed_mfs = Metafeatures().compute(
+                X=dataset["X"],Y=dataset["Y"],
+                column_types=dataset["column_types"]
+            )
             try:
                 json_computed_mfs = json.dumps(computed_mfs)
             except Exception as e:
@@ -347,13 +407,17 @@ class MetafeaturesTestCase(unittest.TestCase):
         self._check_invalid_metafeature_exception_string(str(cm.exception), invalid_metafeatures)
 
     def test_column_type_input(self):
-        column_types = {feature: "NUMERIC" for feature in self.dummy_features.columns}
+        column_types = {col: "NUMERIC" for col in self.dummy_features.columns}
         column_types[self.dummy_features.columns[2]] = "CATEGORICAL"
         column_types[self.dummy_target.name] = "CATEGORICAL"
         # all valid
-        Metafeatures().compute(
-            self.dummy_features, self.dummy_target, column_types
-        )
+        try:
+            Metafeatures().compute(
+                self.dummy_features, self.dummy_target, column_types
+            )
+        except Exception as e:
+            exc_type = type(e).__name__
+            self.fail(f"computing metafeatures raised {exc_type} unexpectedly")
         # some valid
         column_types[self.dummy_features.columns[0]] = "NUMBER"
         column_types[self.dummy_features.columns[1]] = "CATEGORY"
@@ -363,7 +427,7 @@ class MetafeaturesTestCase(unittest.TestCase):
             )
         self.assertTrue(
             str(cm.exception).startswith(
-                "One or more input column types are not valid:"
+                "Invalid column types:"
             ),
             "Some invalid column types test failed"
         )
@@ -376,7 +440,7 @@ class MetafeaturesTestCase(unittest.TestCase):
             )
         self.assertTrue(
             str(cm.exception).startswith(
-                "One or more input column types are not valid:"
+                "Invalid column types:"
             ),
             "All invalid column types test failed"
         )
@@ -386,10 +450,10 @@ class MetafeaturesTestCase(unittest.TestCase):
             Metafeatures().compute(
                 self.dummy_features, self.dummy_target, column_types
             )
-        self.assertEqual(
-            str(cm.exception),
-            "The number of column_types does not match the number of " +
-            "features plus the target",
+        self.assertTrue(
+            str(cm.exception).startswith(
+                "Column type not specified for column"
+            ),
             "Invalid number of column types test failed"
         )
 
@@ -528,115 +592,3 @@ class MetafeaturesTestCase(unittest.TestCase):
 def metafeatures_suite():
     test_cases = [MetafeaturesTestCase, MetafeaturesWithDataTestCase]
     return unittest.TestSuite(map(unittest.TestLoader().loadTestsFromTestCase, test_cases))
-
-
-""" === Anything under is line is currently not in use. === """
-
-
-def import_openml_dataset(id=4):
-    # get a dataset from openml using a dataset id
-    dataset = openml.datasets.get_dataset(id)
-    # get the metafeatures from the dataset
-    omlMetafeatures = {x: float(v) for x, v in dataset.qualities.items()}
-
-    # get X, Y, and attributes from the dataset
-    X, Y, attributes = dataset.get_data(target=dataset.default_target_attribute, return_attribute_names=True)
-
-    # create dataframe object from X,Y, and attributes
-    dataframe = pd.DataFrame(X, columns=attributes)
-    dataframe = dataframe.assign(target=pd.Series(Y))
-
-    # format attributes
-    # TODO: find out if pandas infers type correctly (remove this code after)
-    for i in range(len(X[0])):
-        attributes[i] = (attributes[i], str(type(X[0][i])))
-        # set types of attributes (column headers) as well as the names
-
-    return dataframe, omlMetafeatures
-
-
-def compare_with_openml(dataframe, omlMetafeatures):
-    # get metafeatures from dataset using our metafeatures
-    ourMetafeatures = extract_metafeatures(dataframe)
-    # todo use nested dictionary instead of tuple to make values more descriptive
-    mfDict = json.load(open("oml_metafeature_map.json", "r"))
-
-    omlExclusiveMf = {}
-    ourExclusiveMf = ourMetafeatures
-    sharedMf = []
-    sharedMf.append(
-        ("OML Metafeature Name", "OML Metafeature Value", "Our Metafeature Name", "Our Metafeature Value", "Similar?"))
-    for omlMetafeature in omlMetafeatures:
-        # compare shared metafeatures
-        if (ourMetafeatures.get(omlMetafeature) != None
-                or ourMetafeatures.get("" if omlMetafeature not in mfDict else mfDict.get(omlMetafeature)[0]) != None):
-            omlMetafeatureName = ""
-            omlMetafeatureValue = ""
-            ourMetafeatureName = ""
-            ourMetafeatureValue = ""
-            similarityString = ""
-            diff = 0
-            similarityQualifier = 0.05
-
-            # compare metafeatures with the same name
-            if (ourMetafeatures.get(omlMetafeature) != None):
-                omlMetafeatureName = omlMetafeature
-                omlMetafeatureValue = float(omlMetafeatures.get(omlMetafeature))
-                ourMetafeatureName = omlMetafeature
-                ourMetafeatureValue = float(ourMetafeatures.get(ourMetafeatureName))
-                # similarityQualifier = omlMetafeatureValue * .05
-                diff = omlMetafeatureValue - ourMetafeatureValue
-            # compare equivalent metafeatures with different names
-            elif (ourMetafeatures.get(mfDict.get(omlMetafeature)[0]) != None):
-                ourMetafeatureName, multiplier = mfDict.get(omlMetafeature)
-                ourMetafeatureValue = float(ourMetafeatures.get(ourMetafeatureName))
-                omlMetafeatureName = omlMetafeature
-                omlMetafeatureValue = float(omlMetafeatures.get(omlMetafeature))
-                # similarityQualifier = omlMetafeatureValue * .05
-                diff = omlMetafeatureValue - (ourMetafeatureValue * multiplier)
-
-            # determine if the metafeatures are similar
-            if (abs(diff) <= similarityQualifier):
-                similarityString = "yes"
-            else:
-                # compare oml value with our value, get diff between the two
-                diff = abs(omlMetafeatures[openmlName] - metafeatureValue)
-                if diff > .05:
-                    similarityString = "No"
-                else:
-                    similarityString = "Yes"
-
-                # sharedMfList is a pandas dataframe. We add a row consisting of the following values:
-                # "OML Metafeature Name", "OML Metafeature Value", "Our Metafeature Name", "Our Metafeature Value", "Similar?"
-                sharedMfList.append(
-                    [openmlName, omlMetafeatures[openmlName], metafeatureName, metafeatureValue, similarityString])
-
-                omlExclusiveMf.pop(openmlName)
-
-    for index, row in enumerate(sharedMfList):
-        sharedMf.loc[index] = row
-
-    # print shared metafeature comparison
-    print("Shared metafeature comparison")
-    pd.set_option("display.max_columns", 500)
-    pd.set_option("display.width", 1000)
-
-    sharedMf.sort_values("Similar?", ascending=False, axis=0, inplace=True)
-
-    print(sharedMf)
-
-    # print metafeatures calculate by our primitive exclusively
-    print("\nMetafeatures calculated by our primitive exclusively:")
-    print(json.dumps(ourExclusiveMf, sort_keys=True, indent=4))
-
-
-def sort_by_compute_time(metafeatures):
-    metafeature_times = {}
-    for key in metafeatures:
-        if Metafeatures.COMPUTE_TIME_NAME in key:
-            metafeature_times[key] = metafeatures[key]
-    return dict(sorted(metafeature_times.items(), key=lambda x: x[1], reverse=True))
-
-# if __name__ == "__main__":
-# dataframe, omlMetafeatures = import_openml_dataset()
-# compare_with_openml(dataframe,omlMetafeatures)
